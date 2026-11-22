@@ -1,0 +1,6 @@
+{
+  "name": "كافتيريا",
+  "description": "نظام نقاط بيع وإدارة كافتيريا بتصميم زجاجي حديث ودعم كامل للغة العربية",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

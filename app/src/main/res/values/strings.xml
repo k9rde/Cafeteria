@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">كافتيريا</string>
+    <string name="app_subtitle">نظام إدارة الطاولات ونقاط البيع</string>
+    <string name="status_available">فارغ</string>
+    <string name="status_occupied">مشغول</string>
+    <string name="status_bill_requested">بانتظار الحساب</string>
+    <string name="add_table">إضافة ميز</string>
+    <string name="settings_title">الإعدادات والإدارة</string>
+</resources>
