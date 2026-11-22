@@ -24,6 +24,9 @@ interface CafeDao {
     @Query("SELECT * FROM cafe_tables WHERE id = :tableId")
     suspend fun getTableById(tableId: Int): CafeTableEntity?
 
+    @Query("SELECT * FROM cafe_tables ORDER BY sortOrder ASC, id ASC")
+    suspend fun getAllTablesSnapshot(): List<CafeTableEntity>
+
     @Query("SELECT COUNT(*) FROM cafe_tables")
     suspend fun getTableCount(): Int
 

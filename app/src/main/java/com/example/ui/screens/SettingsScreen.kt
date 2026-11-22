@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.TrendingUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -67,10 +68,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.BuildConfig
 import com.example.R
 import com.example.data.local.MenuCategoryEntity
 import com.example.data.local.MenuItemEntity
 import com.example.data.model.CurrencyOption
+import com.example.data.model.TableStatus
 import com.example.data.model.WallpaperOption
 import com.example.data.model.formatPrice
 import com.example.ui.components.DeveloperContactCard
@@ -81,12 +84,15 @@ import com.example.ui.theme.StatusAvailableGreen
 import com.example.ui.theme.StatusBillRed
 import com.example.ui.viewmodel.CafeteriaUiState
 import com.example.ui.viewmodel.CafeteriaViewModel
+import com.example.ui.viewmodel.TableCardUiModel
 
 @Composable
 fun SettingsScreen(
     uiState: CafeteriaUiState,
     viewModel: CafeteriaViewModel,
     onClose: () -> Unit,
+    hasPendingUpdate: Boolean = false,
+    onCheckForUpdates: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     BackHandler(onBack = onClose)
@@ -115,6 +121,9 @@ fun SettingsScreen(
 
     var showPinDialog by remember { mutableStateOf(false) }
     var showResetShiftDialog by remember { mutableStateOf(false) }
+    var categoryToDelete by remember { mutableStateOf<MenuCategoryEntity?>(null) }
+    var menuItemToDelete by remember { mutableStateOf<MenuItemEntity?>(null) }
+    var tableToDeleteInSettings by remember { mutableStateOf<TableCardUiModel?>(null) }
 
     Box(
         modifier = modifier
@@ -247,7 +256,9 @@ fun SettingsScreen(
                     0 -> item {
                         AppearanceAndGeneralSection(
                             uiState = uiState,
-                            viewModel = viewModel
+                            viewModel = viewModel,
+                            hasPendingUpdate = hasPendingUpdate,
+                            onCheckForUpdates = onCheckForUpdates
                         )
                     }
 
@@ -306,7 +317,7 @@ fun SettingsScreen(
                                     editingCategory = category
                                     showCategoryDialog = true
                                 },
-                                onDeleteCategory = { viewModel.deleteCategory(category.id) },
+                                onDeleteCategory = { categoryToDelete = category },
                                 onAddItem = {
                                     editingMenuItem = null
                                     defaultCategoryForNewItem = category.id
@@ -317,7 +328,8 @@ fun SettingsScreen(
                                     defaultCategoryForNewItem = category.id
                                     showMenuItemDialog = true
                                 },
-                                onDeleteItem = { item -> viewModel.deleteMenuItem(item.id) }
+                                onDeleteItem = { item -> menuItemToDelete = item },
+                                modifier = Modifier.animateItem()
                             )
                         }
                     }
@@ -344,7 +356,10 @@ fun SettingsScreen(
                         items(uiState.tables, key = { it.table.id }) { model ->
                             GlassCard(
                                 shape = RoundedCornerShape(18.dp),
-                                modifier = Modifier.fillMaxWidth()
+                                lightweight = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .animateItem()
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -362,7 +377,7 @@ fun SettingsScreen(
                                         )
                                     }
                                     IconButton(
-                                        onClick = { viewModel.deleteTable(model.table.id) },
+                                        onClick = { tableToDeleteInSettings = model },
                                         modifier = Modifier.minimumInteractiveComponentSize()
                                     ) {
                                         Icon(
@@ -432,13 +447,92 @@ fun SettingsScreen(
             }
         )
     }
+
+    categoryToDelete?.let { category ->
+        AlertDialog(
+            onDismissRequest = { categoryToDelete = null },
+            title = { Text("حذف قسم «${category.name}»؟") },
+            text = { Text("سيتم حذف هذا القسم وجميع الأصناف الموجودة بداخله من المنيو نهائياً.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteCategory(category.id)
+                        categoryToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = StatusBillRed)
+                ) {
+                    Text("حذف القسم")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { categoryToDelete = null }) { Text("إلغاء") }
+            }
+        )
+    }
+
+    menuItemToDelete?.let { item ->
+        AlertDialog(
+            onDismissRequest = { menuItemToDelete = null },
+            title = { Text("حذف «${item.name}»؟") },
+            text = { Text("سيتم إزالة هذا الصنف من المنيو. الفواتير المفتوحة حالياً لن تتأثر.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteMenuItem(item.id)
+                        menuItemToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = StatusBillRed)
+                ) {
+                    Text("حذف الصنف")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { menuItemToDelete = null }) { Text("إلغاء") }
+            }
+        )
+    }
+
+    tableToDeleteInSettings?.let { target ->
+        val isBusy = target.table.statusEnum != TableStatus.AVAILABLE
+        AlertDialog(
+            onDismissRequest = { tableToDeleteInSettings = null },
+            title = { Text("حذف ${target.table.name}؟") },
+            text = {
+                Text(
+                    if (isBusy) {
+                        "تنبيه: هذا الميز مشغول حالياً ويحتوي على ${target.itemCount} أصناف بقيمة ${
+                            formatPrice(target.grandTotal, uiState.settings.currency)
+                        }. هل أنت متأكد من حذفه؟"
+                    } else {
+                        "سيتم حذف ${target.table.name} نهائياً من لوحة الطاولات."
+                    }
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteTable(target.table.id)
+                        tableToDeleteInSettings = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = StatusBillRed)
+                ) {
+                    Text("حذف")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { tableToDeleteInSettings = null }) { Text("إلغاء") }
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AppearanceAndGeneralSection(
     uiState: CafeteriaUiState,
-    viewModel: CafeteriaViewModel
+    viewModel: CafeteriaViewModel,
+    hasPendingUpdate: Boolean,
+    onCheckForUpdates: () -> Unit
 ) {
     val settings = uiState.settings
 
@@ -649,6 +743,66 @@ private fun AppearanceAndGeneralSection(
             }
         }
 
+        // App Updates & Version Card
+        GlassCard(
+            shape = RoundedCornerShape(24.dp),
+            accentTint = if (hasPendingUpdate) AmberGold else null,
+            borderColor = if (hasPendingUpdate) AmberGold.copy(alpha = 0.6f) else null,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    SquircleIconBadge(
+                        iconKey = "sparkles",
+                        accentColor = if (hasPendingUpdate) AmberGold else StatusAvailableGreen,
+                        size = 44.dp,
+                        iconSize = 22.dp
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "تحديثات التطبيق",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "الإصدار الحالي: ${BuildConfig.VERSION_NAME} • يحفظ جميع البيانات عند التحديث",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(Modifier.width(8.dp))
+
+                Button(
+                    onClick = onCheckForUpdates,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (hasPendingUpdate) AmberGold else MaterialTheme.colorScheme.primary,
+                        contentColor = Color(0xFF1A1104)
+                    ),
+                    modifier = Modifier.testTag("check_updates_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.SystemUpdate,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (hasPendingUpdate) "تحديث الآن" else "تحقق")
+                }
+            }
+        }
+
         DeveloperContactCard()
     }
 }
@@ -848,14 +1002,16 @@ private fun CategoryManagementCard(
     onDeleteCategory: () -> Unit,
     onAddItem: () -> Unit,
     onEditItem: (MenuItemEntity) -> Unit,
-    onDeleteItem: (MenuItemEntity) -> Unit
+    onDeleteItem: (MenuItemEntity) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val catColor = Color(category.colorHex)
 
     GlassCard(
         shape = RoundedCornerShape(22.dp),
         accentTint = catColor,
-        modifier = Modifier.fillMaxWidth()
+        lightweight = true,
+        modifier = modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier.padding(14.dp),

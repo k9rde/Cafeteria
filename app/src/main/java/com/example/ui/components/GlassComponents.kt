@@ -54,6 +54,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -61,6 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.Locale
 import com.example.R
 import com.example.data.model.TableStatus
 import com.example.data.model.WallpaperOption
@@ -121,7 +123,7 @@ fun CafeteriaWallpaperBackground(
     blurIntensity: Float,
     modifier: Modifier = Modifier
 ) {
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(modifier = modifier.fillMaxSize().graphicsLayer()) {
         val blurModifier = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && blurIntensity > 0.5f) {
             Modifier.blur((blurIntensity * 0.75f).dp)
         } else {
@@ -196,6 +198,7 @@ fun GlassCard(
     accentTint: Color? = null,
     borderColor: Color? = null,
     opacityMultiplier: Float = 1f,
+    lightweight: Boolean = false,
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
@@ -240,6 +243,17 @@ fun GlassCard(
         }
     )
 
+    val shadowModifier = if (lightweight) {
+        Modifier
+    } else {
+        Modifier.shadow(
+            elevation = if (glassStyle.isDarkMode) 8.dp else 6.dp,
+            shape = shape,
+            ambientColor = Color.Black.copy(alpha = 0.18f),
+            spotColor = Color.Black.copy(alpha = 0.22f)
+        )
+    }
+
     val clickableModifier = if (onClick != null) {
         Modifier.clickable(onClick = onClick)
     } else {
@@ -248,12 +262,7 @@ fun GlassCard(
 
     Box(
         modifier = modifier
-            .shadow(
-                elevation = if (glassStyle.isDarkMode) 8.dp else 6.dp,
-                shape = shape,
-                ambientColor = Color.Black.copy(alpha = 0.18f),
-                spotColor = Color.Black.copy(alpha = 0.22f)
-            )
+            .then(shadowModifier)
             .clip(shape)
             .background(tintedFill)
             .border(width = 1.dp, brush = resolvedBorder, shape = shape)
@@ -375,16 +384,17 @@ fun LiveElapsedTimerText(
     val minutes = (totalSeconds % 3600) / 60
     val seconds = totalSeconds % 60
     val formatted = if (hours > 0) {
-        String.format("%02d:%02d:%02d", hours, minutes, seconds)
+        String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
     } else {
-        String.format("%02d:%02d", minutes, seconds)
+        String.format(Locale.US, "%02d:%02d", minutes, seconds)
     }
 
     Text(
         text = formatted,
         style = MaterialTheme.typography.labelMedium.copy(
             fontWeight = FontWeight.Bold,
-            fontSize = 12.sp
+            fontSize = 12.sp,
+            fontFeatureSettings = "tnum"
         ),
         color = color,
         modifier = modifier

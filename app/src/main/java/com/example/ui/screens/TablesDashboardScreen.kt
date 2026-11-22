@@ -40,6 +40,7 @@ import androidx.compose.material.icons.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.TableRestaurant
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
@@ -99,6 +100,8 @@ fun TablesDashboardScreen(
     onToggleEditMode: () -> Unit,
     onFilterChange: (TableFilter) -> Unit,
     onOpenSettings: () -> Unit,
+    hasPendingUpdate: Boolean = false,
+    onOpenUpdate: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var tableToRename by remember { mutableStateOf<TableCardUiModel?>(null) }
@@ -263,6 +266,52 @@ fun TablesDashboardScreen(
                 }
             }
 
+            // Optional Pending In-App Update Banner (if postponed earlier)
+            if (hasPendingUpdate) {
+                item(key = "pending_update_banner", span = { GridItemSpan(maxLineSpan) }) {
+                    Surface(
+                        onClick = onOpenUpdate,
+                        shape = RoundedCornerShape(18.dp),
+                        color = AmberGold.copy(alpha = 0.16f),
+                        border = BorderStroke(1.dp, AmberGold.copy(alpha = 0.6f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .minimumInteractiveComponentSize()
+                            .testTag("pending_update_banner")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.SystemUpdate,
+                                    contentDescription = null,
+                                    tint = AmberGold,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = "يتوفر تحديث جديد جاهز للتثبيت دون حذف البيانات",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Text(
+                                text = "تحديث",
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                color = AmberGold
+                            )
+                        }
+                    }
+                }
+            }
+
             // 2. Scrollable Filter Chips Row
             item(key = "dashboard_filters", span = { GridItemSpan(maxLineSpan) }) {
                 LazyRow(
@@ -368,7 +417,8 @@ fun TablesDashboardScreen(
             } else {
                 items(
                     items = uiState.filteredTables,
-                    key = { it.table.id }
+                    key = { it.table.id },
+                    contentType = { "table_card" }
                 ) { model ->
                     TableGridCard(
                         model = model,
@@ -377,7 +427,8 @@ fun TablesDashboardScreen(
                         isEditMode = uiState.isEditTablesMode,
                         onClick = { onTableClick(model.table.id) },
                         onRenameClick = { tableToRename = model },
-                        onDeleteClick = { tableToDelete = model }
+                        onDeleteClick = { tableToDelete = model },
+                        modifier = Modifier.animateItem()
                     )
                 }
 
@@ -607,7 +658,8 @@ private fun TableGridCard(
     isEditMode: Boolean,
     onClick: () -> Unit,
     onRenameClick: () -> Unit,
-    onDeleteClick: () -> Unit
+    onDeleteClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val status = model.table.statusEnum
     val accentColor = when (status) {
@@ -617,7 +669,7 @@ private fun TableGridCard(
     }
 
     GlassCard(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .testTag("table_card_${model.table.id}"),
         shape = RoundedCornerShape(24.dp),

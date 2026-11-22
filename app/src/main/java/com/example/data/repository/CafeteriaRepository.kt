@@ -13,6 +13,7 @@ import com.example.data.model.AppSettingsState
 import com.example.data.model.CurrencyOption
 import com.example.data.model.TableStatus
 import com.example.data.model.WallpaperOption
+import com.example.data.model.formatDiscountPercent
 import com.example.data.model.formatPrice
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
@@ -26,6 +27,7 @@ class CafeteriaRepository(
     private val settingsDataStore: SettingsDataStore
 ) {
     private val seedMutex = Mutex()
+    private val mutationMutex = Mutex()
     @Volatile
     private var seeded = false
 
@@ -123,32 +125,41 @@ class CafeteriaRepository(
     }
 
     // Table Management
-    suspend fun addTable(customName: String? = null) {
-        val nextNum = dao.getTableCount() + 1
-        val name = customName?.takeIf { it.isNotBlank() } ?: "ميز $nextNum"
+    suspend fun addTable(customName: String? = null) = mutationMutex.withLock {
+        val existingTables = dao.getAllTablesSnapshot()
+        val existingNames = existingTables.map { it.name.trim() }.toSet()
+        val nextSortOrder = (existingTables.maxOfOrNull { it.sortOrder } ?: 0) + 1
+        val cleanCustom = customName?.trim()?.takeIf { it.isNotEmpty() }
+        val resolvedName = cleanCustom ?: run {
+            var candidateNum = 1
+            while ("ميز $candidateNum" in existingNames) {
+                candidateNum++
+            }
+            "ميز $candidateNum"
+        }
         dao.insertTable(
             CafeTableEntity(
-                name = name,
-                sortOrder = nextNum,
+                name = resolvedName,
+                sortOrder = nextSortOrder,
                 status = TableStatus.AVAILABLE.name
             )
         )
     }
 
-    suspend fun renameTable(tableId: Int, newName: String) {
+    suspend fun renameTable(tableId: Int, newName: String) = mutationMutex.withLock {
         val cleanName = newName.trim()
-        if (cleanName.isEmpty()) return
-        val table = dao.getTableById(tableId) ?: return
+        if (cleanName.isEmpty()) return@withLock
+        val table = dao.getTableById(tableId) ?: return@withLock
         dao.updateTable(table.copy(name = cleanName))
     }
 
-    suspend fun deleteTable(tableId: Int) {
+    suspend fun deleteTable(tableId: Int) = mutationMutex.withLock {
         dao.clearOrderItemsForTable(tableId)
         dao.deleteTableById(tableId)
     }
 
-    suspend fun toggleBillRequested(tableId: Int) {
-        val table = dao.getTableById(tableId) ?: return
+    suspend fun toggleBillRequested(tableId: Int) = mutationMutex.withLock {
+        val table = dao.getTableById(tableId) ?: return@withLock
         val current = table.statusEnum
         val nextStatus = when (current) {
             TableStatus.OCCUPIED -> TableStatus.BILL_REQUESTED
@@ -159,8 +170,8 @@ class CafeteriaRepository(
     }
 
     // Order Operations
-    suspend fun addMenuItemToTable(tableId: Int, menuItem: MenuItemEntity) {
-        val table = dao.getTableById(tableId) ?: return
+    suspend fun addMenuItemToTable(tableId: Int, menuItem: MenuItemEntity) = mutationMutex.withLock {
+        val table = dao.getTableById(tableId) ?: return@withLock
         val category = dao.getCategoryById(menuItem.categoryId)
         val existing = dao.findUnnotedOrderItem(tableId, menuItem.id)
         if (existing != null) {
@@ -190,13 +201,13 @@ class CafeteriaRepository(
         }
     }
 
-    suspend fun incrementOrderItem(orderItemId: Int) {
-        val item = dao.getOrderItemById(orderItemId) ?: return
+    suspend fun incrementOrderItem(orderItemId: Int) = mutationMutex.withLock {
+        val item = dao.getOrderItemById(orderItemId) ?: return@withLock
         dao.updateOrderItem(item.copy(quantity = item.quantity + 1))
     }
 
-    suspend fun decrementOrderItem(orderItemId: Int) {
-        val item = dao.getOrderItemById(orderItemId) ?: return
+    suspend fun decrementOrderItem(orderItemId: Int) = mutationMutex.withLock {
+        val item = dao.getOrderItemById(orderItemId) ?: return@withLock
         if (item.quantity > 1) {
             dao.updateOrderItem(item.copy(quantity = item.quantity - 1))
         } else {
@@ -218,13 +229,13 @@ class CafeteriaRepository(
         }
     }
 
-    suspend fun updateOrderItemNote(orderItemId: Int, note: String) {
-        val item = dao.getOrderItemById(orderItemId) ?: return
+    suspend fun updateOrderItemNote(orderItemId: Int, note: String) = mutationMutex.withLock {
+        val item = dao.getOrderItemById(orderItemId) ?: return@withLock
         dao.updateOrderItem(item.copy(note = note.trim()))
     }
 
-    suspend fun updateTableCharges(tableId: Int, discountPercent: Double, serviceCharge: Double) {
-        val table = dao.getTableById(tableId) ?: return
+    suspend fun updateTableCharges(tableId: Int, discountPercent: Double, serviceCharge: Double) = mutationMutex.withLock {
+        val table = dao.getTableById(tableId) ?: return@withLock
         dao.updateTable(
             table.copy(
                 discountPercent = discountPercent.coerceIn(0.0, 100.0),
@@ -233,12 +244,12 @@ class CafeteriaRepository(
         )
     }
 
-    suspend fun transferTable(fromTableId: Int, toTableId: Int): Boolean {
-        if (fromTableId == toTableId) return false
-        val fromTable = dao.getTableById(fromTableId) ?: return false
-        val toTable = dao.getTableById(toTableId) ?: return false
+    suspend fun transferTable(fromTableId: Int, toTableId: Int): Boolean = mutationMutex.withLock {
+        if (fromTableId == toTableId) return@withLock false
+        val fromTable = dao.getTableById(fromTableId) ?: return@withLock false
+        val toTable = dao.getTableById(toTableId) ?: return@withLock false
         val items = dao.getOrderItemsForTable(fromTableId)
-        if (items.isEmpty()) return false
+        if (items.isEmpty()) return@withLock false
 
         dao.moveOrderItems(fromTableId, toTableId)
         dao.updateTable(
@@ -257,11 +268,11 @@ class CafeteriaRepository(
                 serviceCharge = 0.0
             )
         )
-        return true
+        true
     }
 
-    suspend fun checkoutAndClearTable(tableId: Int): Boolean {
-        val table = dao.getTableById(tableId) ?: return false
+    suspend fun checkoutAndClearTable(tableId: Int): Boolean = mutationMutex.withLock {
+        val table = dao.getTableById(tableId) ?: return@withLock false
         val items = dao.getOrderItemsForTable(tableId)
         if (items.isEmpty()) {
             dao.updateTable(
@@ -272,7 +283,7 @@ class CafeteriaRepository(
                     serviceCharge = 0.0
                 )
             )
-            return true
+            return@withLock true
         }
 
         val subtotal = items.sumOf { it.lineTotal }
@@ -313,7 +324,7 @@ class CafeteriaRepository(
                 serviceCharge = 0.0
             )
         )
-        return true
+        true
     }
 
     // Category & Menu Item Management
@@ -392,27 +403,28 @@ class CafeteriaRepository(
         val grandTotal = (subtotal - discountAmount + table.serviceCharge).coerceAtLeast(0.0)
 
         return buildString {
-            appendLine("══════ كافتيريا ══════")
+            appendLine("══════════ قصة كافيه ══════════")
             appendLine("الطاولة: ${table.name}")
             appendLine("التاريخ: ${timeFormat.format(Date())}")
-            appendLine("──────────────────────")
+            appendLine("────────────────────────────────")
             items.forEach { item ->
                 appendLine("${item.itemName} × ${item.quantity}  —  ${formatPrice(item.lineTotal, currency)}")
                 if (item.note.isNotBlank()) {
                     appendLine("   * ملاحظة: ${item.note}")
                 }
             }
-            appendLine("──────────────────────")
+            appendLine("────────────────────────────────")
             appendLine("المجموع الفرعي: ${formatPrice(subtotal, currency)}")
             if (discountAmount > 0.0) {
-                appendLine("الخصم (${table.discountPercent.toInt()}%): -${formatPrice(discountAmount, currency)}")
+                appendLine("الخصم (${formatDiscountPercent(table.discountPercent)}%): -${formatPrice(discountAmount, currency)}")
             }
             if (table.serviceCharge > 0.0) {
                 appendLine("رسوم الخدمة: +${formatPrice(table.serviceCharge, currency)}")
             }
             appendLine("المجموع الكلي: ${formatPrice(grandTotal, currency)}")
-            appendLine("══════════════════════")
-            appendLine("شكراً لزيارتكم!")
+            appendLine("════════════════════════════════")
+            appendLine("تشرفنا بزيارتكم!")
+            appendLine("نتمنى لكم أوقاتاً سعيدة ونسعد بخدمتكم دائماً")
         }
     }
 }

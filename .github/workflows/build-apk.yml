@@ -47,14 +47,31 @@ jobs:
       - name: Build Debug APK
         run: gradle assembleDebug --no-daemon
 
-      - name: Prepare APK for Release
-        run: cp app/build/outputs/apk/debug/app-debug.apk Cafeteria-POS.apk
+      - name: Prepare APK and Update Metadata for Release
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk Cafeteria-POS.apk
+          VERSION_CODE=$(grep -E "versionCode\s*=" app/build/gradle.kts | head -n1 | sed -E 's/[^0-9]//g')
+          VERSION_NAME=$(grep -E "versionName\s*=" app/build/gradle.kts | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -f docs/version.json ] && grep -q "\"versionCode\"[[:space:]]*:[[:space:]]*${VERSION_CODE}" docs/version.json; then
+            cp docs/version.json version.json
+          else
+            cat <<EOF > version.json
+          {
+            "versionCode": ${VERSION_CODE},
+            "versionName": "${VERSION_NAME}",
+            "apkUrl": "https://github.com/k9rde/Cafeteria/releases/download/latest/Cafeteria-POS.apk",
+            "releaseNotes": "تحديث جديد لتطبيق قصة كافيه يتضمن تحسينات في الأداء والسلاسة وإصلاحات مهمة دون حذف أي بيانات."
+          }
+          EOF
+          fi
 
       - name: Publish Direct Download Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: "Cafeteria POS (كافتيريا)"
-          body: "أحدث نسخة جاهزة للتثبيت من تطبيق كافتيريا."
-          files: Cafeteria-POS.apk
+          body: "أحدث نسخة جاهزة للتثبيت والتحديث المباشر من تطبيق كافتيريا."
+          files: |
+            Cafeteria-POS.apk
+            version.json
           overwrite_files: true

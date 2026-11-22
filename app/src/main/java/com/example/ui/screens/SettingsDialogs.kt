@@ -69,6 +69,7 @@ fun CategoryEditorDialog(
     var name by remember(existing) { mutableStateOf(existing?.name ?: "") }
     var iconKey by remember(existing) { mutableStateOf(existing?.iconKey ?: "hookah") }
     var colorHex by remember(existing) { mutableLongStateOf(existing?.colorHex ?: 0xFFFF9F0A) }
+    var errorMsg by remember(existing) { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -80,8 +81,13 @@ fun CategoryEditorDialog(
             ) {
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it },
+                    onValueChange = {
+                        name = it
+                        errorMsg = null
+                    },
                     label = { Text("اسم القسم (مثال: العصائر)") },
+                    isError = errorMsg != null,
+                    supportingText = errorMsg?.let { msg -> { Text(msg, color = StatusBillRed) } },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -140,8 +146,10 @@ fun CategoryEditorDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (name.isNotBlank()) {
-                        onSave(existing?.id, name, iconKey, colorHex)
+                    if (name.isBlank()) {
+                        errorMsg = "يرجى إدخال اسم القسم"
+                    } else {
+                        onSave(existing?.id, name.trim(), iconKey, colorHex)
                         onDismiss()
                     }
                 }
@@ -173,14 +181,17 @@ fun MenuItemEditorDialog(
             } ?: ""
         )
     }
-    var selectedCategoryId by remember(existing, initialCategoryId) {
-        mutableStateOf(existing?.categoryId ?: initialCategoryId)
+    var selectedCategoryId by remember(existing, initialCategoryId, categories) {
+        val preferred = existing?.categoryId ?: initialCategoryId
+        val valid = categories.firstOrNull { it.id == preferred }?.id ?: categories.firstOrNull()?.id ?: 0
+        mutableStateOf(valid)
     }
     var iconKey by remember(existing) {
         mutableStateOf(
             existing?.iconKey ?: categories.firstOrNull { it.id == selectedCategoryId }?.iconKey ?: "coffee"
         )
     }
+    var validationError by remember(existing) { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -206,7 +217,10 @@ fun MenuItemEditorDialog(
 
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it },
+                    onValueChange = {
+                        name = it
+                        validationError = null
+                    },
                     label = { Text("اسم الصنف (مثال: تفاحتين / موهيتو)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -214,12 +228,23 @@ fun MenuItemEditorDialog(
 
                 OutlinedTextField(
                     value = priceStr,
-                    onValueChange = { priceStr = it.filter { ch -> ch.isDigit() || ch == '.' } },
+                    onValueChange = {
+                        priceStr = it.filter { ch -> ch.isDigit() || ch == '.' }
+                        validationError = null
+                    },
                     label = { Text("السعر (${currency.symbol})") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                validationError?.let { err ->
+                    Text(
+                        text = err,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = StatusBillRed
+                    )
+                }
 
                 Text("الأيقونة:", style = MaterialTheme.typography.labelLarge)
                 FlowRow(
@@ -257,9 +282,17 @@ fun MenuItemEditorDialog(
             Button(
                 onClick = {
                     val price = priceStr.toDoubleOrNull()
-                    if (name.isNotBlank() && price != null && price >= 0.0) {
-                        onSave(existing?.id, selectedCategoryId, name, price, iconKey)
-                        onDismiss()
+                    when {
+                        categories.isEmpty() || selectedCategoryId == 0 ->
+                            validationError = "يرجى إنشاء قسم أولاً"
+                        name.isBlank() ->
+                            validationError = "يرجى إدخال اسم الصنف"
+                        price == null || price < 0.0 ->
+                            validationError = "يرجى إدخال سعر صحيح"
+                        else -> {
+                            onSave(existing?.id, selectedCategoryId, name.trim(), price, iconKey)
+                            onDismiss()
+                        }
                     }
                 }
             ) {
@@ -279,6 +312,7 @@ fun PinSetupDialog(
     onSavePin: (String) -> Unit
 ) {
     var pinInput by remember(currentPin) { mutableStateOf(currentPin) }
+    var pinError by remember(currentPin) { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -293,8 +327,11 @@ fun PinSetupDialog(
                     value = pinInput,
                     onValueChange = { value ->
                         pinInput = value.filter { it.isDigit() }.take(4)
+                        pinError = null
                     },
                     label = { Text("رمز PIN (4 أرقام)") },
+                    isError = pinError != null,
+                    supportingText = pinError?.let { err -> { Text(err, color = StatusBillRed) } },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -307,6 +344,8 @@ fun PinSetupDialog(
                     if (pinInput.isEmpty() || pinInput.length == 4) {
                         onSavePin(pinInput)
                         onDismiss()
+                    } else {
+                        pinError = "يجب أن يتكون الرمز من 4 أرقام كاملة"
                     }
                 }
             ) {

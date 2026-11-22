@@ -14,11 +14,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -56,6 +55,7 @@ import com.example.data.local.MenuItemEntity
 import com.example.data.local.OrderItemEntity
 import com.example.data.model.CurrencyOption
 import com.example.data.model.TableStatus
+import com.example.data.model.formatDiscountPercent
 import com.example.data.model.formatPrice
 import com.example.ui.components.GlassCard
 import com.example.ui.components.LiveElapsedTimerText
@@ -87,16 +87,20 @@ fun TableOrderPanel(
 ) {
     val table = tableModel.table
     val currency = uiState.settings.currency
-    val orderItems = uiState.selectedTableOrderItems
+    var cachedOrderItems by remember(table.id) { mutableStateOf(uiState.selectedTableOrderItems) }
+    if (uiState.selectedTableId == table.id) {
+        cachedOrderItems = uiState.selectedTableOrderItems
+    }
+    val orderItems = cachedOrderItems
     val filteredMenuItems = remember(uiState.menuItems, uiState.selectedCategoryId) {
         uiState.menuItems.filter { it.categoryId == uiState.selectedCategoryId && it.isAvailable }
     }
 
-    var noteTargetItem by remember { mutableStateOf<OrderItemEntity?>(null) }
-    var showChargesDialog by remember { mutableStateOf(false) }
-    var showTransferDialog by remember { mutableStateOf(false) }
-    var receiptToPreview by remember { mutableStateOf<String?>(null) }
-    var showCheckoutDialog by remember { mutableStateOf(false) }
+    var noteTargetItem by remember(table.id) { mutableStateOf<OrderItemEntity?>(null) }
+    var showChargesDialog by remember(table.id) { mutableStateOf(false) }
+    var showTransferDialog by remember(table.id) { mutableStateOf(false) }
+    var receiptToPreview by remember(table.id) { mutableStateOf<String?>(null) }
+    var showCheckoutDialog by remember(table.id) { mutableStateOf(false) }
 
     val subtotal = orderItems.sumOf { it.lineTotal }
     val discountAmount = subtotal * (table.discountPercent / 100.0)
@@ -263,39 +267,38 @@ fun TableOrderPanel(
                         ?: 0xFFFF9F0A
                 )
 
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 136.dp),
+                LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(0.52f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        .testTag("menu_items_strip"),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(vertical = 2.dp)
                 ) {
-                    items(filteredMenuItems, key = { it.id }) { item ->
+                    items(filteredMenuItems, key = { it.id }, contentType = { "menu_item" }) { item ->
                         GlassCard(
-                            shape = RoundedCornerShape(18.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            lightweight = true,
                             onClick = { onAddMenuItem(item) },
                             modifier = Modifier
-                                .fillMaxWidth()
+                                .animateItem()
+                                .widthIn(min = 142.dp, max = 200.dp)
                                 .testTag("menu_item_${item.id}")
                         ) {
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(10.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 SquircleIconBadge(
                                     iconKey = item.iconKey,
                                     accentColor = selectedCategoryColor,
-                                    size = 36.dp,
-                                    iconSize = 18.dp
+                                    size = 34.dp,
+                                    iconSize = 17.dp
                                 )
-                                Column(modifier = Modifier.weight(1f)) {
+                                Column {
                                     Text(
                                         text = item.name,
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis
@@ -303,7 +306,8 @@ fun TableOrderPanel(
                                     Text(
                                         text = formatPrice(item.price, currency),
                                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = AmberGold
+                                        color = AmberGold,
+                                        maxLines = 1
                                     )
                                 }
                             }
@@ -356,7 +360,7 @@ fun TableOrderPanel(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(0.48f),
+                            .weight(1f),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -369,17 +373,19 @@ fun TableOrderPanel(
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(0.48f),
+                            .weight(1f)
+                            .testTag("order_cart_list"),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(bottom = 8.dp)
                     ) {
-                        items(orderItems, key = { it.id }) { orderItem ->
+                        items(orderItems, key = { it.id }, contentType = { "order_row" }) { orderItem ->
                             OrderCartItemRow(
                                 item = orderItem,
                                 currency = currency,
                                 onIncrement = { onIncrementOrderItem(orderItem.id) },
                                 onDecrement = { onDecrementOrderItem(orderItem.id) },
-                                onNoteClick = { noteTargetItem = orderItem }
+                                onNoteClick = { noteTargetItem = orderItem },
+                                modifier = Modifier.animateItem()
                             )
                         }
                     }
@@ -396,8 +402,8 @@ fun TableOrderPanel(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -422,7 +428,7 @@ fun TableOrderPanel(
                         ) {
                             Text(
                                 text = buildString {
-                                    if (discountAmount > 0.0) append("خصم ${table.discountPercent.toInt()}% ")
+                                    if (discountAmount > 0.0) append("خصم ${formatDiscountPercent(table.discountPercent)}% ")
                                     if (table.serviceCharge > 0.0) append("• خدمة")
                                 },
                                 style = MaterialTheme.typography.bodySmall,
@@ -472,6 +478,7 @@ fun TableOrderPanel(
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.09f),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                             modifier = Modifier
+                                .alpha(if (orderItems.isNotEmpty()) 1f else 0.42f)
                                 .minimumInteractiveComponentSize()
                                 .testTag("print_receipt_button")
                         ) {
@@ -501,6 +508,7 @@ fun TableOrderPanel(
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.09f),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                             modifier = Modifier
+                                .alpha(if (orderItems.isNotEmpty()) 1f else 0.42f)
                                 .minimumInteractiveComponentSize()
                                 .testTag("transfer_table_button")
                         ) {
@@ -579,8 +587,10 @@ fun TableOrderPanel(
 
     receiptToPreview?.let { receipt ->
         ReceiptPreviewDialog(
+            table = table,
+            items = orderItems,
+            currency = currency,
             receiptText = receipt,
-            tableName = table.name,
             onDismiss = { receiptToPreview = null }
         )
     }
@@ -602,11 +612,13 @@ private fun OrderCartItemRow(
     currency: CurrencyOption,
     onIncrement: () -> Unit,
     onDecrement: () -> Unit,
-    onNoteClick: () -> Unit
+    onNoteClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     GlassCard(
         shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth()
+        lightweight = true,
+        modifier = modifier.fillMaxWidth()
     ) {
         Row(
             modifier = Modifier

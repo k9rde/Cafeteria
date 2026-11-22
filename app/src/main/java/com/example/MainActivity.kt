@@ -6,8 +6,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,8 +51,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.local.CafeteriaDatabase
 import com.example.data.local.SettingsDataStore
 import com.example.data.repository.CafeteriaRepository
+import com.example.data.updater.AppUpdateManager
 import com.example.ui.components.CafeteriaWallpaperBackground
 import com.example.ui.components.GlassCard
+import com.example.ui.screens.AppUpdateDialog
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.TableOrderPanel
 import com.example.ui.screens.TablesDashboardScreen
@@ -57,8 +62,11 @@ import com.example.ui.theme.AmberGold
 import com.example.ui.theme.CafeteriaTheme
 import com.example.ui.viewmodel.CafeteriaViewModel
 import com.example.ui.viewmodel.CafeteriaViewModelFactory
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
+    private lateinit var updateManager: AppUpdateManager
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -67,6 +75,9 @@ class MainActivity : ComponentActivity() {
         val settingsDataStore = SettingsDataStore(applicationContext)
         val repository = CafeteriaRepository(database.cafeDao(), settingsDataStore)
         val factory = CafeteriaViewModelFactory(repository)
+
+        updateManager = AppUpdateManager(applicationContext)
+        updateManager.cleanupOldUpdateFiles()
 
         setContent {
             val viewModel: CafeteriaViewModel = viewModel(factory = factory)
@@ -79,6 +90,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            LaunchedEffect(Unit) {
+                delay(1200L)
+                updateManager.checkForUpdates(manual = false)
+            }
+
             CafeteriaTheme(
                 darkTheme = uiState.settings.isDarkMode,
                 glassOpacity = uiState.settings.glassOpacity,
@@ -86,9 +102,17 @@ class MainActivity : ComponentActivity() {
             ) {
                 CafeteriaAppRoot(
                     viewModel = viewModel,
+                    updateManager = updateManager,
                     snackbarHostState = snackbarHostState
                 )
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::updateManager.isInitialized) {
+            updateManager.onHostResumed()
         }
     }
 }
@@ -96,9 +120,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun CafeteriaAppRoot(
     viewModel: CafeteriaViewModel,
+    updateManager: AppUpdateManager,
     snackbarHostState: SnackbarHostState
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val updateState by updateManager.state.collectAsStateWithLifecycle()
+    val postponedUpdate by updateManager.postponedUpdate.collectAsStateWithLifecycle()
+    val isUpdateDialogVisible by updateManager.isDialogVisible.collectAsStateWithLifecycle()
     var showSettings by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -123,14 +151,16 @@ private fun CafeteriaAppRoot(
 
                 AnimatedContent(
                     targetState = showSettings,
-                    transitionSpec = { fadeIn() togetherWith fadeOut() },
+                    transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(180)) },
                     label = "root_screen_transition"
                 ) { inSettings ->
                     if (inSettings) {
                         SettingsScreen(
                             uiState = uiState,
                             viewModel = viewModel,
-                            onClose = { showSettings = false }
+                            onClose = { showSettings = false },
+                            hasPendingUpdate = postponedUpdate != null,
+                            onCheckForUpdates = { updateManager.reopenPostponedUpdate() }
                         )
                     } else if (isTabletOrWide) {
                         // Tablet / iPadOS Split-Pane Layout
@@ -149,6 +179,8 @@ private fun CafeteriaAppRoot(
                                 onToggleEditMode = { viewModel.toggleEditTablesMode() },
                                 onFilterChange = { viewModel.setTableFilter(it) },
                                 onOpenSettings = { showSettings = true },
+                                hasPendingUpdate = postponedUpdate != null,
+                                onOpenUpdate = { updateManager.reopenPostponedUpdate() },
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight()
@@ -190,55 +222,86 @@ private fun CafeteriaAppRoot(
                             }
                         }
                     } else {
-                        // Smartphone Adaptive Flow
+                        // Smartphone Adaptive Flow with smooth animated transitions
                         val selected = uiState.selectedTable
-                        if (selected != null) {
-                            BackHandler {
-                                viewModel.selectTable(null)
+                        AnimatedContent(
+                            targetState = selected?.table?.id,
+                            transitionSpec = {
+                                if (targetState != null) {
+                                    (fadeIn(tween(220)) + slideInHorizontally(tween(240)) { -it / 4 })
+                                        .togetherWith(fadeOut(tween(180)) + slideOutHorizontally(tween(200)) { it / 6 })
+                                } else {
+                                    (fadeIn(tween(220)) + slideInHorizontally(tween(240)) { it / 6 })
+                                        .togetherWith(fadeOut(tween(180)) + slideOutHorizontally(tween(200)) { -it / 4 })
+                                }
+                            },
+                            label = "phone_table_transition"
+                        ) { targetTableId ->
+                            val currentSelected = targetTableId?.let { id ->
+                                uiState.tables.firstOrNull { it.table.id == id }
                             }
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                            ) {
-                                TableOrderPanel(
+                            if (currentSelected != null) {
+                                BackHandler {
+                                    viewModel.selectTable(null)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    TableOrderPanel(
+                                        uiState = uiState,
+                                        tableModel = currentSelected,
+                                        showBackButton = true,
+                                        onClosePanel = { viewModel.selectTable(null) },
+                                        onSelectCategory = { viewModel.selectCategory(it) },
+                                        onAddMenuItem = { viewModel.addMenuItemToSelectedTable(it) },
+                                        onIncrementOrderItem = { viewModel.incrementOrderItem(it) },
+                                        onDecrementOrderItem = { viewModel.decrementOrderItem(it) },
+                                        onUpdateOrderNote = { id, note -> viewModel.updateOrderItemNote(id, note) },
+                                        onToggleBillRequested = { viewModel.toggleBillRequested(currentSelected.table.id) },
+                                        onUpdateCharges = { disc, svc -> viewModel.updateTableCharges(currentSelected.table.id, disc, svc) },
+                                        onTransferTable = { targetId -> viewModel.transferTable(currentSelected.table.id, targetId) },
+                                        onCheckoutTable = { viewModel.checkoutAndClearTable(currentSelected.table.id) },
+                                        onBuildReceipt = {
+                                            viewModel.buildReceiptText(
+                                                currentSelected.table,
+                                                uiState.selectedTableOrderItems,
+                                                uiState.settings.currency
+                                            )
+                                        }
+                                    )
+                                }
+                            } else {
+                                TablesDashboardScreen(
                                     uiState = uiState,
-                                    tableModel = selected,
-                                    showBackButton = true,
-                                    onClosePanel = { viewModel.selectTable(null) },
-                                    onSelectCategory = { viewModel.selectCategory(it) },
-                                    onAddMenuItem = { viewModel.addMenuItemToSelectedTable(it) },
-                                    onIncrementOrderItem = { viewModel.incrementOrderItem(it) },
-                                    onDecrementOrderItem = { viewModel.decrementOrderItem(it) },
-                                    onUpdateOrderNote = { id, note -> viewModel.updateOrderItemNote(id, note) },
-                                    onToggleBillRequested = { viewModel.toggleBillRequested(selected.table.id) },
-                                    onUpdateCharges = { disc, svc -> viewModel.updateTableCharges(selected.table.id, disc, svc) },
-                                    onTransferTable = { targetId -> viewModel.transferTable(selected.table.id, targetId) },
-                                    onCheckoutTable = { viewModel.checkoutAndClearTable(selected.table.id) },
-                                    onBuildReceipt = {
-                                        viewModel.buildReceiptText(
-                                            selected.table,
-                                            uiState.selectedTableOrderItems,
-                                            uiState.settings.currency
-                                        )
-                                    }
+                                    onTableClick = { viewModel.selectTable(it) },
+                                    onAddTable = { viewModel.addTable(it) },
+                                    onRenameTable = { id, name -> viewModel.renameTable(id, name) },
+                                    onDeleteTable = { viewModel.deleteTable(it) },
+                                    onToggleEditMode = { viewModel.toggleEditTablesMode() },
+                                    onFilterChange = { viewModel.setTableFilter(it) },
+                                    onOpenSettings = { showSettings = true },
+                                    hasPendingUpdate = postponedUpdate != null,
+                                    onOpenUpdate = { updateManager.reopenPostponedUpdate() }
                                 )
                             }
-                        } else {
-                            TablesDashboardScreen(
-                                uiState = uiState,
-                                onTableClick = { viewModel.selectTable(it) },
-                                onAddTable = { viewModel.addTable(it) },
-                                onRenameTable = { id, name -> viewModel.renameTable(id, name) },
-                                onDeleteTable = { viewModel.deleteTable(it) },
-                                onToggleEditMode = { viewModel.toggleEditTablesMode() },
-                                onFilterChange = { viewModel.setTableFilter(it) },
-                                onOpenSettings = { showSettings = true }
-                            )
                         }
                     }
                 }
             }
+        }
+
+        if (isUpdateDialogVisible) {
+            AppUpdateDialog(
+                updateState = updateState,
+                onStartDownload = { info -> updateManager.startUpdateDownload(info) },
+                onPostpone = { updateManager.postponeUpdate() },
+                onCancelDownload = { updateManager.cancelDownload() },
+                onInstallReady = { file, info -> updateManager.installDownloadedApk(file, info) },
+                onOpenPermissionSettings = { updateManager.openInstallPermissionSettings() },
+                onRetryCheck = { updateManager.checkForUpdates(manual = true) }
+            )
         }
     }
 }

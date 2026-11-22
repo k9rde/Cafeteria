@@ -105,4 +105,21 @@ class ExampleRobolectricTest {
         assertEquals("6,000 د.ع", formatPrice(6000.0, CurrencyOption.IQD))
         assertEquals("$12.50", formatPrice(12.5, CurrencyOption.USD))
     }
+
+    @Test
+    fun `adding table after deletion avoids duplicate names and formats decimal discounts`() = runTest {
+        repository.ensureSeeded()
+        val initialTables = repository.tablesFlow.first()
+        val table3 = initialTables.first { it.name == "ميز 3" }
+
+        repository.deleteTable(table3.id)
+        repository.addTable()
+
+        val afterAdd = repository.tablesFlow.first()
+        assertEquals(12, afterAdd.size)
+        assertEquals(12, afterAdd.map { it.name }.distinct().size)
+        assertTrue(afterAdd.any { it.name == "ميز 3" })
+        assertEquals("10", com.example.data.model.formatDiscountPercent(10.0))
+        assertEquals("12.5", com.example.data.model.formatDiscountPercent(12.5))
+    }
 }

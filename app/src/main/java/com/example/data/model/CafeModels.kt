@@ -91,3 +91,11 @@ fun formatPrice(amount: Double, currency: CurrencyOption): String {
         "$formatted ${currency.symbol}"
     }
 }
+
+fun formatDiscountPercent(percent: Double): String {
+    return if (percent % 1.0 == 0.0) {
+        percent.toInt().toString()
+    } else {
+        String.format(Locale.US, "%.1f", percent)
+    }
+}
