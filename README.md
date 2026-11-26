@@ -2,7 +2,7 @@
 
 <img src="docs/readme_icon.png" alt="شعار كافتيريا قصة كافيه" width="128" />
 
-# كافتيريا • قصة كافيه
+# كافتيريا • 
 
 <p>
   <a href="https://github.com/k9rde/Cafeteria/releases/latest">
